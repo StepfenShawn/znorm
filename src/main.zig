@@ -1,5 +1,7 @@
 const std = @import("std");
 
+const QueryResult = struct { id: u64, score: f32 };
+
 pub const VectorDB = struct {
     allocator: std.mem.Allocator,
     dim: usize,
@@ -49,6 +51,47 @@ pub const VectorDB = struct {
         return error.IDNotFound;
     }
 
+    fn cosSimilarity(a: []const f32, b: []const f32) f32 {
+        var dot: f32 = 0.0;
+        var norm_a: f32 = 0.0;
+        var norm_b: f32 = 0.0;
+        for (a, b) |x, y| {
+            dot += x * y;
+            norm_a += x * x;
+            norm_b += y * y;
+        }
+        if (norm_a == 0.0 or norm_b == 0.0) return 0.0;
+        return dot / (@sqrt(norm_a) * @sqrt(norm_b));
+    }
+
+    pub fn search(self: *const VectorDB, query: []const f32, k: usize) ![]QueryResult {
+        if (query.len != self.dim) {
+            return error.InvalidDimension;
+        }
+        const CandidateType = struct { idx: usize, score: f32 };
+        var candidates = try std.ArrayList(CandidateType).initCapacity(self.allocator, 0);
+        defer candidates.deinit(self.allocator);
+
+        for (self.vectors.items, 0..) |vec, i| {
+            if (self.deleted.items[i]) continue;
+            const score = cosSimilarity(query, vec);
+            try candidates.append(self.allocator, .{ .idx = i, .score = score });
+        }
+
+        std.mem.sort(CandidateType, candidates.items, {}, struct {
+            fn cmp(_: void, a: @TypeOf(candidates.items[0]), b: @TypeOf(candidates.items[0])) bool {
+                return a.score > b.score;
+            }
+        }.cmp);
+
+        const result_len = @min(k, candidates.items.len);
+        const result = try self.allocator.alloc(QueryResult, result_len);
+        for (candidates.items[0..result_len], 0..) |item, j| {
+            result[j] = .{ .id = self.ids.items[item.idx], .score = item.score };
+        }
+        return result;
+    }
+
     pub fn display(self: *const VectorDB) void {
         std.debug.print("VectorDB (dim={}):\n", .{self.dim});
         for (self.ids.items, self.vectors.items, self.deleted.items) |id, vec, deleted| {
@@ -59,6 +102,62 @@ pub const VectorDB = struct {
             }
             std.debug.print("], deleted={}\n", .{deleted});
         }
+    }
+
+    pub fn save(self: *const VectorDB, file_path: []const u8) !void {
+        const file = try std.fs.cwd().createFile(file_path, .{});
+        defer file.close();
+        const writer = file.writer();
+
+        try writer.writeAll("ZVDB");
+        try writer.writeInt(u64, self.dim, .little);
+        var count: u64 = 0;
+        for (self.deleted.items) |del| {
+            if (!del) count += 1;
+        }
+        try writer.writeInt(u64, count, .little);
+
+        for (self.ids.items, self.vectors.items, self.deleted.items) |id, vec, del| {
+            if (del) continue;
+            try writer.writeInt(u64, id, .little);
+            // 将 f32 按 little‑endian 字节写入
+            for (vec) |v| {
+                const bytes = std.mem.asBytes(&v);
+                try writer.writeAll(bytes);
+            }
+        }
+    }
+
+    pub fn load(allocator: std.mem.Allocator, file_path: []const u8) !VectorDB {
+        const file = try std.fs.cwd().openFile(file_path, .{});
+        defer file.close();
+        const reader = file.reader();
+
+        var magic: [4]u8 = undefined;
+        try reader.readNoEof(&magic);
+        if (!std.mem.eql(u8, &magic, "ZVDB")) return error.InvalidFile;
+
+        const dim = try reader.readInt(u64, .little);
+        const count = try reader.readInt(u64, .little);
+
+        var db = try VectorDB.init(allocator, @as(usize, @intCast(dim)));
+        try db.ids.ensureTotalCapacity(@as(usize, @intCast(count)));
+        try db.vectors.ensureTotalCapacity(@as(usize, @intCast(count)));
+        try db.deleted.ensureTotalCapacity(@as(usize, @intCast(count)));
+
+        for (0..@as(usize, @intCast(count))) |_| {
+            const id = try reader.readInt(u64, .little);
+            const vec = try allocator.alloc(f32, @as(usize, @intCast(dim)));
+            for (vec) |*v| {
+                var buf: [4]u8 = undefined;
+                try reader.readNoEof(&buf);
+                v.* = @bitCast(buf);
+            }
+            try db.ids.append(id);
+            try db.vectors.append(vec);
+            try db.deleted.append(false);
+        }
+        return db;
     }
 };
 
@@ -74,5 +173,13 @@ pub fn main() !void {
 
     db.display();
 
-    std.debug.print("Hello, World!\n", .{});
+    const query = [_]f32{ 1.0, 0.5, 0.0 };
+    const results = try db.search(&query, 2);
+    defer allocator.free(results);
+
+    std.debug.print("Top 2 results:\n", .{});
+    for (results) |res| {
+        std.debug.print("ID: {}, Score: {d:.3}\n", .{ res.id, res.score });
+    }
+    // try db.save("mydb.bin");
 }
