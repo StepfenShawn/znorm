@@ -25,7 +25,7 @@ pub fn main(init: std.process.Init) !void {
     db.display();
 
     const query = [_]f32{ 1.0, 0.5, 0.0 };
-    const results = try db.search(&query, 2);
+    const results = try db.search(&query, 2, null);
     defer allocator.free(results);
 
     std.debug.print("Top 2 results:\n", .{});

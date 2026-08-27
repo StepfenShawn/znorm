@@ -1,4 +1,6 @@
 const std = @import("std");
+const filter_mod = @import("filter.zig");
+pub const Filter = filter_mod.Filter;
 
 pub const QueryResult = struct {
     id: u64,
@@ -73,7 +75,7 @@ pub const VectorDB = struct {
         return dot / (@sqrt(norm_a) * @sqrt(norm_b));
     }
 
-    pub fn search(self: *const VectorDB, query: []const f32, k: usize) ![]QueryResult {
+    pub fn search(self: *const VectorDB, query: []const f32, k: usize, filter: ?[]const Filter) ![]QueryResult {
         if (query.len != self.dim) {
             return error.InvalidDimension;
         }
@@ -83,6 +85,10 @@ pub const VectorDB = struct {
 
         for (self.ids.items, 0..) |_, i| {
             if (self.deleted.items[i]) continue;
+            if (filter) |f| {
+                const meta = self.metadata.get(self.ids.items[i]);
+                if (!try filter_mod.evaluateAll(f, meta)) continue;
+            }
             const vec = self.vectors.items[i * self.dim ..][0..self.dim];
             const score = cosSimilarity(query, vec);
             try candidates.append(self.allocator, .{ .idx = i, .score = score });

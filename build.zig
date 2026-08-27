@@ -38,6 +38,11 @@ pub fn build(b: *std.Build) void {
         .target = target,
     });
 
+    const filter_mod = b.addModule("filter", .{
+        .root_source_file = b.path("src/filter.zig"),
+        .target = target,
+    });
+
     // Here we define an executable. An executable needs to have a root module
     // which needs to expose a `main` function. While we could add a main function
     // to the module defined above, it's sometimes preferable to split business
@@ -142,7 +147,7 @@ pub fn build(b: *std.Build) void {
     // Integration tests from tests/ directory
     const integration_tests = b.addTest(.{
         .root_module = b.createModule(.{
-            .root_source_file = b.path("tests/vector_ops.zig"),
+            .root_source_file = b.path("tests/ops.zig"),
             .target = target,
             .imports = &.{
                 .{ .name = "vector_db", .module = vector_db_mod },
@@ -151,6 +156,19 @@ pub fn build(b: *std.Build) void {
     });
     const run_integration_tests = b.addRunArtifact(integration_tests);
     test_step.dependOn(&run_integration_tests.step);
+
+    // Filter unit tests from tests/ directory
+    const filter_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("tests/filter.zig"),
+            .target = target,
+            .imports = &.{
+                .{ .name = "filter", .module = filter_mod },
+            },
+        }),
+    });
+    const run_filter_tests = b.addRunArtifact(filter_tests);
+    test_step.dependOn(&run_filter_tests.step);
 
     // Just like flags, top level steps are also listed in the `--help` menu.
     //
