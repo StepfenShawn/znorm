@@ -6,7 +6,7 @@ pub const VectorDB = struct {
     allocator: std.mem.Allocator,
     dim: usize,
     ids: std.ArrayListUnmanaged(u64),
-    vectors: std.ArrayListUnmanaged([]f32),
+    vectors: std.ArrayList(f32),
     deleted: std.ArrayListUnmanaged(bool),
 
     pub fn init(allocator: std.mem.Allocator, dim: usize) !VectorDB {
@@ -14,15 +14,12 @@ pub const VectorDB = struct {
             .allocator = allocator,
             .dim = dim,
             .ids = .{ .items = &[0]u64{}, .capacity = 0 },
-            .vectors = .{ .items = &[0][]f32{}, .capacity = 0 },
+            .vectors = .empty,
             .deleted = .{ .items = &[0]bool{}, .capacity = 0 },
         };
     }
 
     pub fn deinit(self: *VectorDB) void {
-        for (self.vectors.items) |vec| {
-            self.allocator.free(vec);
-        }
         self.vectors.deinit(self.allocator);
         self.ids.deinit(self.allocator);
         self.deleted.deinit(self.allocator);
@@ -33,11 +30,8 @@ pub const VectorDB = struct {
             return error.InvalidDimension;
         }
 
-        const vec_copy = try self.allocator.alloc(f32, self.dim);
-        @memcpy(vec_copy, vector);
-
         try self.ids.append(self.allocator, id);
-        try self.vectors.append(self.allocator, vec_copy);
+        try self.vectors.appendSlice(self.allocator, vector);
         try self.deleted.append(self.allocator, false);
     }
 
@@ -72,8 +66,9 @@ pub const VectorDB = struct {
         var candidates = try std.ArrayList(CandidateType).initCapacity(self.allocator, 0);
         defer candidates.deinit(self.allocator);
 
-        for (self.vectors.items, 0..) |vec, i| {
+        for (self.ids.items, 0..) |_, i| {
             if (self.deleted.items[i]) continue;
+            const vec = self.vectors.items[i * self.dim ..][0..self.dim];
             const score = cosSimilarity(query, vec);
             try candidates.append(self.allocator, .{ .idx = i, .score = score });
         }
@@ -94,13 +89,14 @@ pub const VectorDB = struct {
 
     pub fn display(self: *const VectorDB) void {
         std.debug.print("VectorDB (dim={}):\n", .{self.dim});
-        for (self.ids.items, self.vectors.items, self.deleted.items) |id, vec, deleted| {
+        for (self.ids.items, 0..) |id, i| {
+            const vec = self.vectors.items[i * self.dim ..][0..self.dim];
             std.debug.print("   id={d}, vec=[", .{id});
-            for (vec, 0..) |v, i| {
-                if (i > 0) std.debug.print(", ", .{});
+            for (vec, 0..) |v, j| {
+                if (j > 0) std.debug.print(", ", .{});
                 std.debug.print("{d:.2}", .{v});
             }
-            std.debug.print("], deleted={}\n", .{deleted});
+            std.debug.print("], deleted={}\n", .{self.deleted.items[i]});
         }
     }
 
@@ -119,9 +115,10 @@ pub const VectorDB = struct {
         }
         try writer.interface.writeInt(u64, count, .little);
 
-        for (self.ids.items, self.vectors.items, self.deleted.items) |id, vec, del| {
-            if (del) continue;
+        for (self.ids.items, 0..) |id, i| {
+            if (self.deleted.items[i]) continue;
             try writer.interface.writeInt(u64, id, .little);
+            const vec = self.vectors.items[i * self.dim ..][0..self.dim];
             for (vec) |v| {
                 const bytes = std.mem.asBytes(&v);
                 try writer.interface.writeAll(bytes);
@@ -144,19 +141,21 @@ pub const VectorDB = struct {
         const count = try reader.interface.takeInt(u64, .little);
 
         var db = try VectorDB.init(allocator, @as(usize, @intCast(dim)));
-        try db.ids.ensureTotalCapacity(allocator, @as(usize, @intCast(count)));
-        try db.vectors.ensureTotalCapacity(allocator, @as(usize, @intCast(count)));
-        try db.deleted.ensureTotalCapacity(allocator, @as(usize, @intCast(count)));
+        const count_usize = @as(usize, @intCast(count));
+        try db.ids.ensureTotalCapacity(allocator, count_usize);
+        try db.vectors.ensureTotalCapacity(allocator, count_usize * @as(usize, @intCast(dim)));
+        try db.deleted.ensureTotalCapacity(allocator, count_usize);
 
-        for (0..@as(usize, @intCast(count))) |_| {
+        for (0..count_usize) |_| {
             const id = try reader.interface.takeInt(u64, .little);
             const vec = try allocator.alloc(f32, @as(usize, @intCast(dim)));
+            defer allocator.free(vec);
             for (vec) |*v| {
                 const buf = try reader.interface.takeArray(4);
                 v.* = @bitCast(buf.*);
             }
             try db.ids.append(allocator, id);
-            try db.vectors.append(allocator, vec);
+            try db.vectors.appendSlice(allocator, vec);
             try db.deleted.append(allocator, false);
         }
         return db;
