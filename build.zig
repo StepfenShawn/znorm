@@ -29,15 +29,12 @@ pub fn build(b: *std.Build) void {
     // multiple modules and consumers will need to be able to specify which
     // module they want to access.
     const mod = b.addModule("zig_project", .{
-        // The root source file is the "entry point" of this module. Users of
-        // this module will only be able to access public declarations contained
-        // in this file, which means that if you have declarations that you
-        // intend to expose to consumers that were defined in other files part
-        // of this module, you will have to make sure to re-export them from
-        // the root file.
         .root_source_file = b.path("src/root.zig"),
-        // Later on we'll use this module as the root module of a test executable
-        // which requires us to specify a target.
+        .target = target,
+    });
+
+    const vector_db_mod = b.addModule("vector_db", .{
+        .root_source_file = b.path("src/vector_db.zig"),
         .target = target,
     });
 
@@ -141,6 +138,19 @@ pub fn build(b: *std.Build) void {
     const test_step = b.step("test", "Run tests");
     test_step.dependOn(&run_mod_tests.step);
     test_step.dependOn(&run_exe_tests.step);
+
+    // Integration tests from tests/ directory
+    const integration_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("tests/vector_ops.zig"),
+            .target = target,
+            .imports = &.{
+                .{ .name = "vector_db", .module = vector_db_mod },
+            },
+        }),
+    });
+    const run_integration_tests = b.addRunArtifact(integration_tests);
+    test_step.dependOn(&run_integration_tests.step);
 
     // Just like flags, top level steps are also listed in the `--help` menu.
     //

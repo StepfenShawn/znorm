@@ -62,7 +62,7 @@ const foo = Type{ .field = value };     // Avoid
 ## Build Commands
 
 - Build: `zig build`
-- Format code: `zig build fmt`
+- Format code: `zig fmt .`
 - Run tests: `zig build test`
 
 ## Testing
