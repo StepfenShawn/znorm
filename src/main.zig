@@ -104,64 +104,66 @@ pub const VectorDB = struct {
         }
     }
 
-    pub fn save(self: *const VectorDB, file_path: []const u8) !void {
-        const file = try std.fs.cwd().createFile(file_path, .{});
-        defer file.close();
-        const writer = file.writer();
+    pub fn save(self: *const VectorDB, io: std.Io, file_path: []const u8) !void {
+        const dir = std.Io.Dir.cwd();
+        const file = try dir.createFile(io, file_path, .{});
+        defer file.close(io);
+        var buffer: [4096]u8 = undefined;
+        var writer = file.writer(io, &buffer);
 
-        try writer.writeAll("ZVDB");
-        try writer.writeInt(u64, self.dim, .little);
+        try writer.interface.writeAll("ZVDB");
+        try writer.interface.writeInt(u64, self.dim, .little);
         var count: u64 = 0;
         for (self.deleted.items) |del| {
             if (!del) count += 1;
         }
-        try writer.writeInt(u64, count, .little);
+        try writer.interface.writeInt(u64, count, .little);
 
         for (self.ids.items, self.vectors.items, self.deleted.items) |id, vec, del| {
             if (del) continue;
-            try writer.writeInt(u64, id, .little);
-            // 将 f32 按 little‑endian 字节写入
+            try writer.interface.writeInt(u64, id, .little);
             for (vec) |v| {
                 const bytes = std.mem.asBytes(&v);
-                try writer.writeAll(bytes);
+                try writer.interface.writeAll(bytes);
             }
         }
+
+        try writer.interface.flush();
     }
 
-    pub fn load(allocator: std.mem.Allocator, file_path: []const u8) !VectorDB {
-        const file = try std.fs.cwd().openFile(file_path, .{});
-        defer file.close();
-        const reader = file.reader();
+    pub fn load(allocator: std.mem.Allocator, io: std.Io, file_path: []const u8) !VectorDB {
+        const file = try std.Io.Dir.cwd().openFile(io, file_path, .{});
+        defer file.close(io);
+        var buffer: [4096]u8 = undefined;
+        var reader = file.reader(io, &buffer);
 
-        var magic: [4]u8 = undefined;
-        try reader.readNoEof(&magic);
-        if (!std.mem.eql(u8, &magic, "ZVDB")) return error.InvalidFile;
+        const magic = try reader.interface.takeArray(4);
+        if (!std.mem.eql(u8, &magic.*, "ZVDB")) return error.InvalidFile;
 
-        const dim = try reader.readInt(u64, .little);
-        const count = try reader.readInt(u64, .little);
+        const dim = try reader.interface.takeInt(u64, .little);
+        const count = try reader.interface.takeInt(u64, .little);
 
         var db = try VectorDB.init(allocator, @as(usize, @intCast(dim)));
-        try db.ids.ensureTotalCapacity(@as(usize, @intCast(count)));
-        try db.vectors.ensureTotalCapacity(@as(usize, @intCast(count)));
-        try db.deleted.ensureTotalCapacity(@as(usize, @intCast(count)));
+        try db.ids.ensureTotalCapacity(allocator, @as(usize, @intCast(count)));
+        try db.vectors.ensureTotalCapacity(allocator, @as(usize, @intCast(count)));
+        try db.deleted.ensureTotalCapacity(allocator, @as(usize, @intCast(count)));
 
         for (0..@as(usize, @intCast(count))) |_| {
-            const id = try reader.readInt(u64, .little);
+            const id = try reader.interface.takeInt(u64, .little);
             const vec = try allocator.alloc(f32, @as(usize, @intCast(dim)));
             for (vec) |*v| {
-                var buf: [4]u8 = undefined;
-                try reader.readNoEof(&buf);
-                v.* = @bitCast(buf);
+                const buf = try reader.interface.takeArray(4);
+                v.* = @bitCast(buf.*);
             }
-            try db.ids.append(id);
-            try db.vectors.append(vec);
-            try db.deleted.append(false);
+            try db.ids.append(allocator, id);
+            try db.vectors.append(allocator, vec);
+            try db.deleted.append(allocator, false);
         }
         return db;
     }
 };
 
-pub fn main() !void {
+pub fn main(init: std.process.Init) !void {
     const allocator = std.heap.page_allocator;
 
     var db = try VectorDB.init(allocator, 3);
@@ -181,5 +183,5 @@ pub fn main() !void {
     for (results) |res| {
         std.debug.print("ID: {}, Score: {d:.3}\n", .{ res.id, res.score });
     }
-    // try db.save("mydb.bin");
+    try db.save(init.io, "mydb.bin");
 }
