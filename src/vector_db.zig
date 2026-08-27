@@ -114,9 +114,11 @@ pub const VectorDB = struct {
     }
 
     pub fn setMetadata(self: *VectorDB, id: u64, key: []const u8, value: []const u8) !void {
-        var meta = self.metadata.get(id) orelse std.StringHashMap([]const u8).init(self.allocator);
-        try meta.put(key, value);
-        try self.metadata.put(id, meta);
+        const gop = try self.metadata.getOrPut(id);
+        if (!gop.found_existing) {
+            gop.value_ptr.* = std.StringHashMap([]const u8).init(self.allocator);
+        }
+        try gop.value_ptr.*.put(key, value);
     }
 
     pub fn removeMetadata(self: *VectorDB, id: u64) void {
