@@ -13,9 +13,9 @@ test "insert and search returns nearest neighbor" {
     var db = try VectorDB.init(allocator, 3);
     defer db.deinit();
 
-    try db.insert(1, &[_]f32{ 1.0, 0.0, 0.0 }, null);
-    try db.insert(2, &[_]f32{ 0.0, 1.0, 0.0 }, null);
-    try db.insert(3, &[_]f32{ 0.0, 0.0, 1.0 }, null);
+    try db.insert(1, &[_]f32{ 1.0, 0.0, 0.0 });
+    try db.insert(2, &[_]f32{ 0.0, 1.0, 0.0 });
+    try db.insert(3, &[_]f32{ 0.0, 0.0, 1.0 });
 
     const query = [_]f32{ 1.0, 0.0, 0.0 };
     const results = try db.search(&query, 1, null);
@@ -32,10 +32,8 @@ test "metadata is returned in search results" {
     var db = try VectorDB.init(allocator, 2);
     defer db.deinit();
 
-    var meta = std.StringHashMap([]const u8).init(allocator);
-    defer meta.deinit();
-    try meta.put("label", "hello");
-    try db.insert(10, &[_]f32{ 1.0, 0.0 }, meta);
+    try db.insert(10, &[_]f32{ 1.0, 0.0 });
+    try db.setMetadata(10, "label", "hello");
 
     const query = [_]f32{ 1.0, 0.0 };
     const results = try db.search(&query, 1, null);
@@ -53,8 +51,8 @@ test "deleted vector is excluded from search" {
     var db = try VectorDB.init(allocator, 2);
     defer db.deinit();
 
-    try db.insert(1, &[_]f32{ 1.0, 0.0 }, null);
-    try db.insert(2, &[_]f32{ 0.9, 0.1 }, null);
+    try db.insert(1, &[_]f32{ 1.0, 0.0 });
+    try db.insert(2, &[_]f32{ 0.9, 0.1 });
 
     try db.delete(1);
 
@@ -72,20 +70,14 @@ test "filter eq string — match" {
     var db = try VectorDB.init(allocator, 3);
     defer db.deinit();
 
-    var m1 = std.StringHashMap([]const u8).init(allocator);
-    defer m1.deinit();
-    try m1.put("category", "science");
-    try db.insert(1, &[_]f32{ 1.0, 0.0, 0.0 }, m1);
+    try db.insert(1, &[_]f32{ 1.0, 0.0, 0.0 });
+    try db.setMetadata(1, "category", "science");
 
-    var m2 = std.StringHashMap([]const u8).init(allocator);
-    defer m2.deinit();
-    try m2.put("category", "art");
-    try db.insert(2, &[_]f32{ 0.9, 0.1, 0.0 }, m2);
+    try db.insert(2, &[_]f32{ 0.9, 0.1, 0.0 });
+    try db.setMetadata(2, "category", "art");
 
-    var m3 = std.StringHashMap([]const u8).init(allocator);
-    defer m3.deinit();
-    try m3.put("category", "science");
-    try db.insert(3, &[_]f32{ 0.8, 0.2, 0.0 }, m3);
+    try db.insert(3, &[_]f32{ 0.8, 0.2, 0.0 });
+    try db.setMetadata(3, "category", "science");
 
     const query = [_]f32{ 1.0, 0.0, 0.0 };
     const filters = [_]Filter{.{ .eq = .{ .key = "category", .value = .{ .string = "science" } } }};
@@ -104,10 +96,8 @@ test "filter eq string — no match" {
     var db = try VectorDB.init(allocator, 3);
     defer db.deinit();
 
-    var m1 = std.StringHashMap([]const u8).init(allocator);
-    defer m1.deinit();
-    try m1.put("category", "science");
-    try db.insert(1, &[_]f32{ 1.0, 0.0, 0.0 }, m1);
+    try db.insert(1, &[_]f32{ 1.0, 0.0, 0.0 });
+    try db.setMetadata(1, "category", "science");
 
     const query = [_]f32{ 1.0, 0.0, 0.0 };
     const filters = [_]Filter{.{ .eq = .{ .key = "category", .value = .{ .string = "art" } } }};
@@ -123,20 +113,14 @@ test "filter gt int" {
     var db = try VectorDB.init(allocator, 2);
     defer db.deinit();
 
-    var m1 = std.StringHashMap([]const u8).init(allocator);
-    defer m1.deinit();
-    try m1.put("year", "2023");
-    try db.insert(1, &[_]f32{ 1.0, 0.0 }, m1);
+    try db.insert(1, &[_]f32{ 1.0, 0.0 });
+    try db.setMetadata(1, "year", "2023");
 
-    var m2 = std.StringHashMap([]const u8).init(allocator);
-    defer m2.deinit();
-    try m2.put("year", "2019");
-    try db.insert(2, &[_]f32{ 0.9, 0.1 }, m2);
+    try db.insert(2, &[_]f32{ 0.9, 0.1 });
+    try db.setMetadata(2, "year", "2019");
 
-    var m3 = std.StringHashMap([]const u8).init(allocator);
-    defer m3.deinit();
-    try m3.put("year", "2025");
-    try db.insert(3, &[_]f32{ 0.8, 0.2 }, m3);
+    try db.insert(3, &[_]f32{ 0.8, 0.2 });
+    try db.setMetadata(3, "year", "2025");
 
     const query = [_]f32{ 1.0, 0.0 };
     const filters = [_]Filter{.{ .gt = .{ .key = "year", .value = .{ .int = 2020 } } }};
@@ -155,15 +139,11 @@ test "filter lt int" {
     var db = try VectorDB.init(allocator, 2);
     defer db.deinit();
 
-    var m1 = std.StringHashMap([]const u8).init(allocator);
-    defer m1.deinit();
-    try m1.put("year", "2023");
-    try db.insert(1, &[_]f32{ 1.0, 0.0 }, m1);
+    try db.insert(1, &[_]f32{ 1.0, 0.0 });
+    try db.setMetadata(1, "year", "2023");
 
-    var m2 = std.StringHashMap([]const u8).init(allocator);
-    defer m2.deinit();
-    try m2.put("year", "2019");
-    try db.insert(2, &[_]f32{ 0.9, 0.1 }, m2);
+    try db.insert(2, &[_]f32{ 0.9, 0.1 });
+    try db.setMetadata(2, "year", "2019");
 
     const query = [_]f32{ 1.0, 0.0 };
     const filters = [_]Filter{.{ .lt = .{ .key = "year", .value = .{ .int = 2020 } } }};
@@ -180,23 +160,23 @@ test "filter multiple conditions (AND via slice)" {
     var db = try VectorDB.init(allocator, 2);
     defer db.deinit();
 
-    var m1 = std.StringHashMap([]const u8).init(allocator);
-    defer m1.deinit();
-    try m1.put("category", "science");
-    try m1.put("year", "2023");
-    try db.insert(1, &[_]f32{ 1.0, 0.0 }, m1);
+    try db.insert(1, &[_]f32{ 1.0, 0.0 });
+    try db.addMetadata(1, &[_]VectorDB.MetadataEntry{
+        .{ .key = "category", .value = "science" },
+        .{ .key = "year", .value = "2023" },
+    });
 
-    var m2 = std.StringHashMap([]const u8).init(allocator);
-    defer m2.deinit();
-    try m2.put("category", "science");
-    try m2.put("year", "2018");
-    try db.insert(2, &[_]f32{ 0.9, 0.1 }, m2);
+    try db.insert(2, &[_]f32{ 0.9, 0.1 });
+    try db.addMetadata(2, &[_]VectorDB.MetadataEntry{
+        .{ .key = "category", .value = "science" },
+        .{ .key = "year", .value = "2018" },
+    });
 
-    var m3 = std.StringHashMap([]const u8).init(allocator);
-    defer m3.deinit();
-    try m3.put("category", "art");
-    try m3.put("year", "2023");
-    try db.insert(3, &[_]f32{ 0.8, 0.2 }, m3);
+    try db.insert(3, &[_]f32{ 0.8, 0.2 });
+    try db.addMetadata(3, &[_]VectorDB.MetadataEntry{
+        .{ .key = "category", .value = "art" },
+        .{ .key = "year", .value = "2023" },
+    });
 
     const query = [_]f32{ 1.0, 0.0 };
     const filters = [_]Filter{
@@ -216,8 +196,8 @@ test "filter null returns all" {
     var db = try VectorDB.init(allocator, 2);
     defer db.deinit();
 
-    try db.insert(1, &[_]f32{ 1.0, 0.0 }, null);
-    try db.insert(2, &[_]f32{ 0.9, 0.1 }, null);
+    try db.insert(1, &[_]f32{ 1.0, 0.0 });
+    try db.insert(2, &[_]f32{ 0.9, 0.1 });
 
     const query = [_]f32{ 1.0, 0.0 };
     const results = try db.search(&query, 10, null);
@@ -232,12 +212,10 @@ test "filter missing key excludes vector" {
     var db = try VectorDB.init(allocator, 2);
     defer db.deinit();
 
-    var m1 = std.StringHashMap([]const u8).init(allocator);
-    defer m1.deinit();
-    try m1.put("category", "science");
-    try db.insert(1, &[_]f32{ 1.0, 0.0 }, m1);
+    try db.insert(1, &[_]f32{ 1.0, 0.0 });
+    try db.setMetadata(1, "category", "science");
 
-    try db.insert(2, &[_]f32{ 0.9, 0.1 }, null);
+    try db.insert(2, &[_]f32{ 0.9, 0.1 });
 
     const query = [_]f32{ 1.0, 0.0 };
     const filters = [_]Filter{.{ .eq = .{ .key = "category", .value = .{ .string = "science" } } }};
@@ -254,20 +232,14 @@ test "filter explicit or" {
     var db = try VectorDB.init(allocator, 3);
     defer db.deinit();
 
-    var m1 = std.StringHashMap([]const u8).init(allocator);
-    defer m1.deinit();
-    try m1.put("category", "science");
-    try db.insert(1, &[_]f32{ 1.0, 0.0, 0.0 }, m1);
+    try db.insert(1, &[_]f32{ 1.0, 0.0, 0.0 });
+    try db.setMetadata(1, "category", "science");
 
-    var m2 = std.StringHashMap([]const u8).init(allocator);
-    defer m2.deinit();
-    try m2.put("category", "art");
-    try db.insert(2, &[_]f32{ 0.9, 0.1, 0.0 }, m2);
+    try db.insert(2, &[_]f32{ 0.9, 0.1, 0.0 });
+    try db.setMetadata(2, "category", "art");
 
-    var m3 = std.StringHashMap([]const u8).init(allocator);
-    defer m3.deinit();
-    try m3.put("category", "music");
-    try db.insert(3, &[_]f32{ 0.8, 0.2, 0.0 }, m3);
+    try db.insert(3, &[_]f32{ 0.8, 0.2, 0.0 });
+    try db.setMetadata(3, "category", "music");
 
     const query = [_]f32{ 1.0, 0.0, 0.0 };
     const f = Filter{ .@"or" = &[_]Filter{
@@ -293,8 +265,8 @@ test "save and load preserves vectors" {
         var db = try VectorDB.init(allocator, 3);
         defer db.deinit();
 
-        try db.insert(1, &[_]f32{ 1.0, 0.0, 0.0 }, null);
-        try db.insert(2, &[_]f32{ 0.0, 1.0, 0.0 }, null);
+        try db.insert(1, &[_]f32{ 1.0, 0.0, 0.0 });
+        try db.insert(2, &[_]f32{ 0.0, 1.0, 0.0 });
 
         try db.save(io, file_path);
     }
@@ -325,15 +297,11 @@ test "save and load preserves metadata" {
         var db = try VectorDB.init(allocator, 3);
         defer db.deinit();
 
-        var m1 = std.StringHashMap([]const u8).init(allocator);
-        defer m1.deinit();
-        try m1.put("category", "science");
-        try db.insert(1, &[_]f32{ 1.0, 0.0, 0.0 }, m1);
+        try db.insert(1, &[_]f32{ 1.0, 0.0, 0.0 });
+        try db.setMetadata(1, "category", "science");
 
-        var m2 = std.StringHashMap([]const u8).init(allocator);
-        defer m2.deinit();
-        try m2.put("category", "art");
-        try db.insert(2, &[_]f32{ 0.0, 1.0, 0.0 }, m2);
+        try db.insert(2, &[_]f32{ 0.0, 1.0, 0.0 });
+        try db.setMetadata(2, "category", "art");
 
         try db.save(io, file_path);
     }
@@ -363,20 +331,14 @@ test "save and load metadata with filter search" {
         var db = try VectorDB.init(allocator, 3);
         defer db.deinit();
 
-        var m1 = std.StringHashMap([]const u8).init(allocator);
-        defer m1.deinit();
-        try m1.put("category", "science");
-        try db.insert(1, &[_]f32{ 1.0, 0.0, 0.0 }, m1);
+        try db.insert(1, &[_]f32{ 1.0, 0.0, 0.0 });
+        try db.setMetadata(1, "category", "science");
 
-        var m2 = std.StringHashMap([]const u8).init(allocator);
-        defer m2.deinit();
-        try m2.put("category", "art");
-        try db.insert(2, &[_]f32{ 0.9, 0.1, 0.0 }, m2);
+        try db.insert(2, &[_]f32{ 0.9, 0.1, 0.0 });
+        try db.setMetadata(2, "category", "art");
 
-        var m3 = std.StringHashMap([]const u8).init(allocator);
-        defer m3.deinit();
-        try m3.put("category", "science");
-        try db.insert(3, &[_]f32{ 0.8, 0.2, 0.0 }, m3);
+        try db.insert(3, &[_]f32{ 0.8, 0.2, 0.0 });
+        try db.setMetadata(3, "category", "science");
 
         try db.save(io, file_path);
     }
@@ -408,8 +370,8 @@ test "save and load with no metadata" {
         var db = try VectorDB.init(allocator, 2);
         defer db.deinit();
 
-        try db.insert(1, &[_]f32{ 1.0, 0.0 }, null);
-        try db.insert(2, &[_]f32{ 0.0, 1.0 }, null);
+        try db.insert(1, &[_]f32{ 1.0, 0.0 });
+        try db.insert(2, &[_]f32{ 0.0, 1.0 });
 
         try db.save(io, file_path);
     }
@@ -435,15 +397,11 @@ test "save and load with deleted vectors" {
         var db = try VectorDB.init(allocator, 2);
         defer db.deinit();
 
-        var m1 = std.StringHashMap([]const u8).init(allocator);
-        defer m1.deinit();
-        try m1.put("category", "science");
-        try db.insert(1, &[_]f32{ 1.0, 0.0 }, m1);
+        try db.insert(1, &[_]f32{ 1.0, 0.0 });
+        try db.setMetadata(1, "category", "science");
 
-        var m2 = std.StringHashMap([]const u8).init(allocator);
-        defer m2.deinit();
-        try m2.put("category", "art");
-        try db.insert(2, &[_]f32{ 0.0, 1.0 }, m2);
+        try db.insert(2, &[_]f32{ 0.0, 1.0 });
+        try db.setMetadata(2, "category", "art");
 
         try db.delete(1);
         try db.save(io, file_path);
@@ -475,18 +433,18 @@ test "save and load with multiple metadata keys" {
         var db = try VectorDB.init(allocator, 3);
         defer db.deinit();
 
-        var m1 = std.StringHashMap([]const u8).init(allocator);
-        defer m1.deinit();
-        try m1.put("category", "science");
-        try m1.put("year", "2023");
-        try m1.put("author", "alice");
-        try db.insert(1, &[_]f32{ 1.0, 0.0, 0.0 }, m1);
+        try db.insert(1, &[_]f32{ 1.0, 0.0, 0.0 });
+        try db.addMetadata(1, &[_]VectorDB.MetadataEntry{
+            .{ .key = "category", .value = "science" },
+            .{ .key = "year", .value = "2023" },
+            .{ .key = "author", .value = "alice" },
+        });
 
-        var m2 = std.StringHashMap([]const u8).init(allocator);
-        defer m2.deinit();
-        try m2.put("category", "art");
-        try m2.put("year", "2024");
-        try db.insert(2, &[_]f32{ 0.0, 1.0, 0.0 }, m2);
+        try db.insert(2, &[_]f32{ 0.0, 1.0, 0.0 });
+        try db.addMetadata(2, &[_]VectorDB.MetadataEntry{
+            .{ .key = "category", .value = "art" },
+            .{ .key = "year", .value = "2024" },
+        });
 
         try db.save(io, file_path);
     }
@@ -508,4 +466,45 @@ test "save and load with multiple metadata keys" {
     }
 
     std.Io.Dir.cwd().deleteFile(io, file_path) catch {};
+}
+
+test "update replaces vector and keeps metadata" {
+    const allocator = testing.allocator;
+
+    var db = try VectorDB.init(allocator, 3);
+    defer db.deinit();
+
+    try db.insert(1, &[_]f32{ 1.0, 0.0, 0.0 });
+    try db.setMetadata(1, "category", "science");
+
+    // 把 id=1 的向量改到靠近 id=3 的方向,搜索结果应随之改变。
+    try db.update(1, &[_]f32{ 0.0, 0.0, 1.0 });
+
+    const query = [_]f32{ 0.0, 0.0, 1.0 };
+    const results = try db.search(&query, 1, null);
+    defer allocator.free(results);
+
+    try testing.expectEqual(@as(u64, 1), results[0].id);
+    const value = results[0].metadata.?.get("category");
+    try testing.expectEqualStrings("science", value.?);
+}
+
+test "update on missing id returns IDNotFound" {
+    const allocator = testing.allocator;
+
+    var db = try VectorDB.init(allocator, 3);
+    defer db.deinit();
+
+    try db.insert(1, &[_]f32{ 1.0, 0.0, 0.0 });
+    try testing.expectError(error.IDNotFound, db.update(99, &[_]f32{ 0.0, 1.0, 0.0 }));
+}
+
+test "update rejects wrong dimension" {
+    const allocator = testing.allocator;
+
+    var db = try VectorDB.init(allocator, 3);
+    defer db.deinit();
+
+    try db.insert(1, &[_]f32{ 1.0, 0.0, 0.0 });
+    try testing.expectError(error.InvalidDimension, db.update(1, &[_]f32{ 0.0, 1.0 }));
 }

@@ -5,8 +5,6 @@ pub const Filter = filter_mod.Filter;
 pub const QueryResult = struct {
     id: u64,
     score: f32,
-    // Returned by value, not as a pointer: HashMap.get() returns a stack copy,
-    // so &copy is a dangling pointer (same issue as getMetadata).
     metadata: ?std.StringHashMap([]const u8) = null,
 };
 
@@ -47,7 +45,7 @@ pub const VectorDB = struct {
         self.metadata.deinit();
     }
 
-    pub fn insert(self: *VectorDB, id: u64, vector: []const f32, metadata: ?std.StringHashMap([]const u8)) !void {
+    pub fn insert(self: *VectorDB, id: u64, vector: []const f32) !void {
         if (vector.len != self.dim) {
             return error.InvalidDimension;
         }
@@ -55,20 +53,6 @@ pub const VectorDB = struct {
         try self.ids.append(self.allocator, id);
         try self.vectors.appendSlice(self.allocator, vector);
         try self.deleted.append(self.allocator, false);
-
-        // Dupe all strings so the DB owns the metadata, not the caller.
-        // Without this, deinit would double-free if the caller deinits their HashMap.
-        if (metadata) |meta| {
-            var owned = std.StringHashMap([]const u8).init(self.allocator);
-            var mit = meta.iterator();
-            while (mit.next()) |entry| {
-                try owned.put(
-                    try self.allocator.dupe(u8, entry.key_ptr.*),
-                    try self.allocator.dupe(u8, entry.value_ptr.*),
-                );
-            }
-            try self.metadata.put(id, owned);
-        }
     }
 
     pub fn delete(self: *VectorDB, id: u64) !void {
@@ -77,6 +61,20 @@ pub const VectorDB = struct {
                 self.deleted.items[i] = true;
                 return;
             }
+        }
+        return error.IDNotFound;
+    }
+
+    pub fn update(self: *VectorDB, id: u64, vector: []const f32) !void {
+        if (vector.len != self.dim) {
+            return error.InvalidDimension;
+        }
+        for (self.ids.items, 0..) |existing_id, i| {
+            if (existing_id != id) continue;
+            if (self.deleted.items[i]) break;
+            const dst = self.vectors.items[i * self.dim ..][0..self.dim];
+            @memcpy(dst, vector);
+            return;
         }
         return error.IDNotFound;
     }
@@ -133,11 +131,8 @@ pub const VectorDB = struct {
         return result;
     }
 
-    // Returns the value by value, not as a pointer. HashMap.get() returns a
-    // copy on the stack; returning &copy would be a dangling pointer. Callers
-    // that need a pointer must obtain one from getOrPut on a mutable reference.
-    pub fn getMetadata(self: *const VectorDB, id: u64) ?std.StringHashMap([]const u8) {
-        return self.metadata.get(id);
+    pub fn getMetadata(self: *VectorDB, id: u64) ?*const std.StringHashMap([]const u8) {
+        return self.metadata.getPtr(id);
     }
 
     pub fn setMetadata(self: *VectorDB, id: u64, key: []const u8, value: []const u8) !void {
@@ -145,12 +140,35 @@ pub const VectorDB = struct {
         if (!gop.found_existing) {
             gop.value_ptr.* = std.StringHashMap([]const u8).init(self.allocator);
         }
-        // Same ownership invariant as insert: caller's string lifetimes don't
-        // extend into the DB, so we dupe to avoid use-after-free.
         try gop.value_ptr.*.put(
             try self.allocator.dupe(u8, key),
             try self.allocator.dupe(u8, value),
         );
+    }
+
+    pub const MetadataEntry = struct {
+        key: []const u8,
+        value: []const u8,
+    };
+
+    pub fn addMetadata(self: *VectorDB, id: u64, items: []const MetadataEntry) !void {
+        for (items) |it| {
+            try self.setMetadata(id, it.key, it.value);
+        }
+    }
+
+    pub fn deleteMetadataKey(self: *VectorDB, id: u64, key: []const u8) void {
+        if (self.metadata.getPtr(id)) |meta| {
+            if (meta.fetchRemove(key)) |kv| {
+                self.allocator.free(kv.key);
+                self.allocator.free(kv.value);
+            }
+        }
+    }
+
+    pub fn getMetadataValue(self: *const VectorDB, id: u64, key: []const u8) ?[]const u8 {
+        const meta = self.metadata.get(id) orelse return null;
+        return meta.get(key);
     }
 
     pub fn removeMetadata(self: *VectorDB, id: u64) void {

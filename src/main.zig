@@ -7,20 +7,19 @@ pub fn main(init: std.process.Init) !void {
     var db = try VectorDB.init(allocator, 3);
     defer db.deinit();
 
-    var meta1 = std.StringHashMap([]const u8).init(allocator);
-    try meta1.put("title", "红色");
-    try meta1.put("category", "颜色");
-    try db.insert(1, &[_]f32{ 1.0, 0.0, 0.0 }, meta1);
+    try db.insert(1, &[_]f32{ 1.0, 0.0, 0.0 });
+    try db.setMetadata(1, "title", "红色");
+    try db.setMetadata(1, "category", "颜色");
 
-    var meta2 = std.StringHashMap([]const u8).init(allocator);
-    try meta2.put("title", "绿色");
-    try meta2.put("category", "颜色");
-    try db.insert(2, &[_]f32{ 0.0, 1.0, 0.0 }, meta2);
+    try db.insert(2, &[_]f32{ 0.0, 1.0, 0.0 });
+    try db.setMetadata(2, "title", "绿色");
+    try db.setMetadata(2, "category", "颜色");
 
-    var meta3 = std.StringHashMap([]const u8).init(allocator);
-    try meta3.put("title", "蓝色");
-    try meta3.put("category", "颜色");
-    try db.insert(3, &[_]f32{ 0.0, 0.0, 1.0 }, meta3);
+    try db.insert(3, &[_]f32{ 0.0, 0.0, 1.0 });
+    try db.setMetadata(3, "title", "蓝色");
+    try db.setMetadata(3, "category", "颜色");
+
+    try db.update(3, &[_]f32{ 0.0, 0.0, 0.5 });
 
     db.display();
 

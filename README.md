@@ -1,6 +1,6 @@
 # znorm
 
-A Zig-native memory engine for on-device AI agents. No GC, no libc, no cloud.  
+A Zig-native memory engine for AI agents. No GC, no libc, no cloud.  
 
 ## Features
 
@@ -27,10 +27,10 @@ pub fn main(init: std.process.Init) !void {
     var db = try VectorDB.init(allocator, 3);
     defer db.deinit();
 
-    var meta1 = std.StringHashMap([]const u8).init(allocator);
-    try meta1.put("title", "red");
-    try meta1.put("category", "color");
-    try db.insert(1, &[_]f32{ 1.0, 0.0, 0.0 }, meta1);
+    // Metadata is managed entirely by the DB: no caller-owned HashMap needed.
+    try db.insert(1, &[_]f32{ 1.0, 0.0, 0.0 });
+    try db.setMetadata(1, "title", "red");
+    try db.setMetadata(1, "category", "color");
 
     db.display();
 
