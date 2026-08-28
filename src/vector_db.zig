@@ -5,7 +5,9 @@ pub const Filter = filter_mod.Filter;
 pub const QueryResult = struct {
     id: u64,
     score: f32,
-    metadata: ?*const std.StringHashMap([]const u8) = null,
+    // Returned by value, not as a pointer: HashMap.get() returns a stack copy,
+    // so &copy is a dangling pointer (same issue as getMetadata).
+    metadata: ?std.StringHashMap([]const u8) = null,
 };
 
 pub const VectorDB = struct {
@@ -31,8 +33,15 @@ pub const VectorDB = struct {
         self.vectors.deinit(self.allocator);
         self.ids.deinit(self.allocator);
         self.deleted.deinit(self.allocator);
+        // Free each key/value string owned by insert/setMetadata before freeing
+        // the inner HashMap, so the allocator doesn't leak the duped strings.
         var it = self.metadata.iterator();
         while (it.next()) |entry| {
+            var meta_it = entry.value_ptr.iterator();
+            while (meta_it.next()) |kv| {
+                self.allocator.free(kv.key_ptr.*);
+                self.allocator.free(kv.value_ptr.*);
+            }
             entry.value_ptr.deinit();
         }
         self.metadata.deinit();
@@ -47,8 +56,18 @@ pub const VectorDB = struct {
         try self.vectors.appendSlice(self.allocator, vector);
         try self.deleted.append(self.allocator, false);
 
+        // Dupe all strings so the DB owns the metadata, not the caller.
+        // Without this, deinit would double-free if the caller deinits their HashMap.
         if (metadata) |meta| {
-            try self.metadata.put(id, meta);
+            var owned = std.StringHashMap([]const u8).init(self.allocator);
+            var mit = meta.iterator();
+            while (mit.next()) |entry| {
+                try owned.put(
+                    try self.allocator.dupe(u8, entry.key_ptr.*),
+                    try self.allocator.dupe(u8, entry.value_ptr.*),
+                );
+            }
+            try self.metadata.put(id, owned);
         }
     }
 
@@ -108,15 +127,17 @@ pub const VectorDB = struct {
             result[j] = .{
                 .id = id,
                 .score = item.score,
-                .metadata = if (meta) |m| &m else null,
+                .metadata = meta,
             };
         }
         return result;
     }
 
-    pub fn getMetadata(self: *const VectorDB, id: u64) ?*const std.StringHashMap([]const u8) {
-        const meta = self.metadata.get(id) orelse return null;
-        return &meta;
+    // Returns the value by value, not as a pointer. HashMap.get() returns a
+    // copy on the stack; returning &copy would be a dangling pointer. Callers
+    // that need a pointer must obtain one from getOrPut on a mutable reference.
+    pub fn getMetadata(self: *const VectorDB, id: u64) ?std.StringHashMap([]const u8) {
+        return self.metadata.get(id);
     }
 
     pub fn setMetadata(self: *VectorDB, id: u64, key: []const u8, value: []const u8) !void {
@@ -124,13 +145,24 @@ pub const VectorDB = struct {
         if (!gop.found_existing) {
             gop.value_ptr.* = std.StringHashMap([]const u8).init(self.allocator);
         }
-        try gop.value_ptr.*.put(key, value);
+        // Same ownership invariant as insert: caller's string lifetimes don't
+        // extend into the DB, so we dupe to avoid use-after-free.
+        try gop.value_ptr.*.put(
+            try self.allocator.dupe(u8, key),
+            try self.allocator.dupe(u8, value),
+        );
     }
 
     pub fn removeMetadata(self: *VectorDB, id: u64) void {
         if (self.metadata.fetchRemove(id)) |kv| {
-            var meta = kv.value;
-            meta.deinit();
+            // Mirror deinit's cleanup: free owned key/value strings before the
+            // HashMap itself. fetchRemove already removed the outer entry.
+            var meta_it = kv.value.iterator();
+            while (meta_it.next()) |entry| {
+                self.allocator.free(entry.key_ptr.*);
+                self.allocator.free(entry.value_ptr.*);
+            }
+            kv.value.deinit();
         }
     }
 
@@ -166,6 +198,7 @@ pub const VectorDB = struct {
         var buffer: [4096]u8 = undefined;
         var writer = file.writer(io, &buffer);
 
+        //  format: "ZVDB" | u64 dim | u64 count | [id+vec]* | u64 meta_count | [id+kv_count+key_value_pairs]*
         try writer.interface.writeAll("ZVDB");
         try writer.interface.writeInt(u64, self.dim, .little);
         var count: u64 = 0;
@@ -184,6 +217,34 @@ pub const VectorDB = struct {
             }
         }
 
+        // Metadata section: count of entries with metadata, then for each entry
+        // the id, key/value count, and key/value pairs with length-prefixed
+        // strings. Deleted vectors' metadata is skipped since they aren't counted.
+        var meta_count: u64 = 0;
+        for (self.ids.items, 0..) |id, i| {
+            if (self.deleted.items[i]) continue;
+            if (self.metadata.contains(id)) meta_count += 1;
+        }
+        try writer.interface.writeInt(u64, meta_count, .little);
+
+        for (self.ids.items, 0..) |id, i| {
+            if (self.deleted.items[i]) continue;
+            if (self.metadata.get(id)) |meta| {
+                try writer.interface.writeInt(u64, id, .little);
+                const kv_count: u32 = @intCast(meta.count());
+                try writer.interface.writeInt(u32, kv_count, .little);
+                var kv_it = meta.iterator();
+                while (kv_it.next()) |kv| {
+                    const key = kv.key_ptr.*;
+                    const val = kv.value_ptr.*;
+                    try writer.interface.writeInt(u32, @intCast(key.len), .little);
+                    try writer.interface.writeAll(key);
+                    try writer.interface.writeInt(u32, @intCast(val.len), .little);
+                    try writer.interface.writeAll(val);
+                }
+            }
+        }
+
         try writer.interface.flush();
     }
 
@@ -193,6 +254,7 @@ pub const VectorDB = struct {
         var buffer: [4096]u8 = undefined;
         var reader = file.reader(io, &buffer);
 
+        //  format: "ZVDB" | u64 dim | u64 count | [id+vec]* | u64 meta_count | [id+kv_count+key_value_pairs]*
         const magic = try reader.interface.takeArray(4);
         if (!std.mem.eql(u8, &magic.*, "ZVDB")) return error.InvalidFile;
 
@@ -217,6 +279,26 @@ pub const VectorDB = struct {
             try db.vectors.appendSlice(allocator, vec);
             try db.deleted.append(allocator, false);
         }
+
+        // Read metadata section: each entry's key/value pairs are duped into
+        // owned memory so the DB owns them independently of the reader buffer.
+        const meta_count = try reader.interface.takeInt(u64, .little);
+        for (0..@as(usize, @intCast(meta_count))) |_| {
+            const id = try reader.interface.takeInt(u64, .little);
+            const kv_count = try reader.interface.takeInt(u32, .little);
+            var meta = std.StringHashMap([]const u8).init(allocator);
+            for (0..@as(usize, @intCast(kv_count))) |_| {
+                const key_len = try reader.interface.takeInt(u32, .little);
+                const key_buf = try reader.interface.take(key_len);
+                const key = try allocator.dupe(u8, key_buf);
+                const val_len = try reader.interface.takeInt(u32, .little);
+                const val_buf = try reader.interface.take(val_len);
+                const val = try allocator.dupe(u8, val_buf);
+                try meta.put(key, val);
+            }
+            try db.metadata.put(id, meta);
+        }
+
         return db;
     }
 };

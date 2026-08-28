@@ -1,6 +1,6 @@
 # znorm
 
-A blazing fast vector database written in pure Zig.
+A Zig-native memory engine for on-device AI agents. No GC, no libc, no cloud.  
 
 ## Features
 
@@ -19,12 +19,27 @@ zig build run
 ## Usage
 
 ```zig
-var db = try VectorDB.init(allocator, 384);
-defer db.deinit();
+const std = @import("std");
+const VectorDB = @import("vector_db.zig").VectorDB;
 
-try db.insert(1, vector, .{ .{"category", "docs"} });
+pub fn main(init: std.process.Init) !void {
+    const allocator = std.heap.page_allocator;
+    var db = try VectorDB.init(allocator, 3);
+    defer db.deinit();
 
-const results = try db.search(query_vector, 10, null);
+    var meta1 = std.StringHashMap([]const u8).init(allocator);
+    try meta1.put("title", "red");
+    try meta1.put("category", "color");
+    try db.insert(1, &[_]f32{ 1.0, 0.0, 0.0 }, meta1);
+
+    db.display();
+
+    const results = try db.search(query_vector, 10, null);
+    defer allocator.free(results);
+    for (results) |res| {
+        std.debug.print("ID: {}, Score: {d:.3}\n", .{ res.id, res.score });
+    }
+}
 ```
 
 ## Build
