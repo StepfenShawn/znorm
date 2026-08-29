@@ -477,7 +477,6 @@ test "update replaces vector and keeps metadata" {
     try db.insert(1, &[_]f32{ 1.0, 0.0, 0.0 });
     try db.setMetadata(1, "category", "science");
 
-    // 把 id=1 的向量改到靠近 id=3 的方向,搜索结果应随之改变。
     try db.update(1, &[_]f32{ 0.0, 0.0, 1.0 });
 
     const query = [_]f32{ 0.0, 0.0, 1.0 };
