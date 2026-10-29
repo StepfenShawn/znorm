@@ -80,10 +80,28 @@ pub const VectorDB = struct {
     }
 
     pub fn cosSimilarity(a: []const f32, b: []const f32) f32 {
-        var dot: f32 = 0.0;
-        var norm_a: f32 = 0.0;
-        var norm_b: f32 = 0.0;
-        for (a, b) |x, y| {
+        const n = a.len;
+        const V = std.simd.suggestVectorLength(f32) orelse 4;
+
+        var dot_v: @Vector(V, f32) = @splat(0.0);
+        var norm_a_v: @Vector(V, f32) = @splat(0.0);
+        var norm_b_v: @Vector(V, f32) = @splat(0.0);
+
+        var i: usize = 0;
+        while (i + V <= n) : (i += V) {
+            const x: @Vector(V, f32) = a[i..][0..V].*;
+            const y: @Vector(V, f32) = b[i..][0..V].*;
+            dot_v += x * y;
+            norm_a_v += x * x;
+            norm_b_v += y * y;
+        }
+        var dot: f32 = @reduce(.Add, dot_v);
+        var norm_a: f32 = @reduce(.Add, norm_a_v);
+        var norm_b: f32 = @reduce(.Add, norm_b_v);
+
+        while (i < n) : (i += 1) {
+            const x = a[i];
+            const y = b[i];
             dot += x * y;
             norm_a += x * x;
             norm_b += y * y;
