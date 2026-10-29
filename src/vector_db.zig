@@ -20,9 +20,9 @@ pub const VectorDB = struct {
         return VectorDB{
             .allocator = allocator,
             .dim = dim,
-            .ids = .{ .items = &[0]u64{}, .capacity = 0 },
+            .ids = .empty,
             .vectors = .empty,
-            .deleted = .{ .items = &[0]bool{}, .capacity = 0 },
+            .deleted = .empty,
             .metadata = std.AutoHashMap(u64, std.StringHashMap([]const u8)).init(allocator),
         };
     }
